@@ -1,22 +1,16 @@
 /**
- * Dashboard estático — variante Vercel.
+ * Dashboard estático — variante Vercel, on-demand.
  *
- * Antes de pedir datos, verifica sesión contra /api/session; si no hay
- * sesión válida, redirige a /login.html. Esto es defensa en profundidad:
- * el control principal debe ser Deployment Protection de Vercel (ver
- * docs/DEPLOYMENT_PLAN_VERCEL.md) — este guard de cliente NO reemplaza esa
- * protección a nivel de edge, solo evita que alguien con la URL directa
- * pero sin sesión vea el contenido servido de este HTML estático.
+ * El usuario tipea appKey/appSecret/janisClient acá y se mandan una única
+ * vez a /api/audit/run (HTTPS, mismo origen) para correr la auditoría en
+ * vivo. Nada se guarda: ni en este archivo, ni en el servidor. Antes de
+ * pedir nada, verifica sesión contra /api/session; si no hay sesión
+ * válida, redirige a /login.html. Eso es defensa en profundidad — el
+ * control principal debe ser Deployment Protection de Vercel (ver
+ * docs/DEPLOYMENT_PLAN_VERCEL.md).
  */
 
 (function () {
-  const apiBaseUrl = '/api';
-
-  function getClientIdFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('clientId');
-  }
-
   function escapeHtml(str) {
     return String(str).replace(/[&<>"']/g, (c) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -87,44 +81,48 @@
     return `<div class="capability-list">${resultados.map(renderRow).join('')}</div>`;
   }
 
-  function renderError(message) {
+  function renderState(message) {
     document.getElementById('content').innerHTML = `<div class="state-message">${escapeHtml(message)}</div>`;
   }
 
-  async function loadAudit(clientId) {
-    document.getElementById('topbar-client').textContent = clientId;
-    document.getElementById('sidebar-client').textContent = clientId;
+  // El backend devuelve "resultados" en lenguaje de negocio (loUsa/noLoUsa);
+  // acá simplemente lo pasamos tal cual a las funciones de render.
+  function renderResult(clientId, data) {
+    const resultados = data.results.map((r) => ({
+      id: r.id,
+      nombre: r.nombre,
+      modulo: r.modulo,
+      endpoint: r.endpoint,
+      valorActual: r.actual,
+      loUsa: Boolean(r.ok),
+    })).sort((a, b) => a.id.localeCompare(b.id));
 
-    const response = await fetch(`${apiBaseUrl}/audit-results/${encodeURIComponent(clientId)}`, {
-      headers: { Accept: 'application/json' },
-      credentials: 'same-origin',
-    });
+    const resumen = {
+      total: resultados.length,
+      loUsa: resultados.filter((r) => r.loUsa).length,
+      noLoUsa: resultados.filter((r) => !r.loUsa).length,
+    };
 
-    if (response.status === 401) {
-      redirectToLogin();
-      return;
-    }
-
-    if (response.status === 404) {
-      renderError(`Todavía no hay auditorías registradas para "${clientId}".`);
-      return;
-    }
-
-    if (!response.ok) {
-      renderError(`No se pudo cargar la auditoría (HTTP ${response.status}).`);
-      return;
-    }
-
-    const data = await response.json();
     document.getElementById('content').innerHTML = `
-      ${renderSummary(data.resumen)}
-      ${renderList(data.resultados)}
+      ${renderSummary(resumen)}
+      ${renderList(resultados)}
       <div class="footer-meta">
-        <span>Última auditoría: ${formatDate(data.auditedAt)}</span>
-        <span>clientId: ${escapeHtml(data.clientId)}</span>
+        <span>Auditoría corrida: ${formatDate(data.auditedAt)} (no se guardó)</span>
+        <span>clientId: ${escapeHtml(clientId)}</span>
       </div>
     `;
   }
+
+  function clearCredentialInputs() {
+    document.getElementById('input-appKey').value = '';
+    document.getElementById('input-appSecret').value = '';
+    document.getElementById('input-janisClient').value = '';
+  }
+
+  document.getElementById('clear-btn').addEventListener('click', () => {
+    clearCredentialInputs();
+    document.getElementById('input-clientId').value = '';
+  });
 
   document.getElementById('logout-link').addEventListener('click', async (e) => {
     e.preventDefault();
@@ -132,22 +130,55 @@
     window.location.href = '/login.html';
   });
 
+  document.getElementById('audit-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const clientId = document.getElementById('input-clientId').value.trim();
+    const appKey = document.getElementById('input-appKey').value;
+    const appSecret = document.getElementById('input-appSecret').value;
+    const janisClient = document.getElementById('input-janisClient').value.trim();
+
+    const submitBtn = document.getElementById('submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Auditando…';
+    renderState('Corriendo la auditoría en vivo contra oms/dom/delivery/picking/tms…');
+
+    try {
+      const response = await fetch('/api/audit/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ clientId, appKey, appSecret, janisClient }),
+      });
+
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        renderState(data.message || `No se pudo correr la auditoría (HTTP ${response.status}).`);
+        return;
+      }
+
+      renderResult(clientId, data);
+    } catch (err) {
+      renderState(`Error inesperado corriendo la auditoría: ${err.message}`);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Auditar ahora';
+      // Las credenciales ya se usaron — no queda razón para dejarlas en pantalla.
+      clearCredentialInputs();
+    }
+  });
+
   async function init() {
     const sessionCheck = await fetch('/api/session', { credentials: 'same-origin' });
     if (!sessionCheck.ok) {
       redirectToLogin();
-      return;
     }
-
-    const clientId = getClientIdFromUrl();
-    if (!clientId) {
-      renderError('Falta el parámetro ?clientId=<id> en la URL.');
-      return;
-    }
-
-    loadAudit(clientId).catch((err) => {
-      renderError(`Error inesperado cargando la auditoría: ${err.message}`);
-    });
   }
 
   init();

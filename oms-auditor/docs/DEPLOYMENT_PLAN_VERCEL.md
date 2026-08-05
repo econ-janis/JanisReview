@@ -1,163 +1,119 @@
-# Plan de despliegue — variante Vercel
+# Plan de despliegue — variante Vercel (on-demand, sin persistencia)
 
-Pediste repensar toda la arquitectura para Vercel en vez de AWS. Este
-documento es el equivalente de `DEPLOYMENT_PLAN.md` pero para
-`vercel-app/`. **No se corrió `vercel deploy` ni se creó ningún proyecto
-en Vercel** — no tengo una cuenta/token de Vercel vinculado a este entorno,
-así que el primer deploy real lo tenés que hacer vos (o pasarme un
-`VERCEL_TOKEN` con permisos acotados si querés que lo dispare yo).
+Pediste que el usuario tipee su propia `janis-api-key`/`janis-api-secret`
+en el front. Eso cambió el diseño de fondo respecto a la primera versión
+de esta variante (la que tenía Secrets Manager + Postgres + cron diario):
 
-## 0. Por qué esto no es un simple "mover el AWS a Vercel"
+- **No hay más auditoría automática diaria.** Sin una credencial guardada
+  en ningún lado, no hay con qué correr un cron desatendido. Esta
+  herramienta pasó a ser 100% on-demand: alguien entra, tipea las
+  credenciales del cliente que quiere chequear, ve el resultado al toque.
+- **No se persiste nada.** Ni la credencial ni el resultado de la
+  auditoría tocan disco — se usan una vez, en memoria, para esa request, y
+  se descartan al responder.
+- **Como consecuencia, ya no hace falta AWS para nada.** Se cayeron
+  Secrets Manager, Postgres/Neon, y el usuario IAM dedicado que iba a leer
+  secretos desde Vercel — todo lo que estaba documentado como "híbrido
+  AWS+Vercel" en la versión anterior de este plan ya no aplica. Esto es
+  una mejora real de superficie de ataque: no queda ningún secreto de
+  cliente viviendo en ningún sistema de forma permanente.
 
-Vercel no tiene equivalente directo a tres piezas centrales del diseño AWS:
+**No se corrió `vercel deploy` ni se creó ningún proyecto en Vercel** — no
+tengo cuenta/token de Vercel en este entorno. Validé todo localmente (ver
+sección 4).
 
-| Necesidad | AWS | Vercel | Qué se hizo acá |
-|---|---|---|---|
-| Secretos por cliente (decenas/cientos de credenciales, acceso granular) | Secrets Manager (`GetSecretValue` acotado por ARN) | No existe un servicio equivalente — las env vars de Vercel son globales al proyecto, no por-secreto | **Se mantiene AWS Secrets Manager solo para esto** (ver sección 2) — arquitectura híbrida, no 100% Vercel |
-| Auth de API con roles/IAM | API Gateway + `AWS_IAM`/Cognito | No hay authorizer nativo de API en Vercel | Deployment Protection (control principal) + gate propio con cookie firmada (defensa en profundidad) — ver sección 4 |
-| Persistencia con TTL nativo | DynamoDB TTL | Postgres no tiene TTL nativo | Cron diario que corre `DELETE ... WHERE audited_at < NOW() - retención` |
+## 1. Qué hay en el repo (`oms-auditor/vercel-app/`)
 
-Esto es información real que tenías que tener antes de decidir — no es
-que "no se pudo", es que una migración honesta a Vercel deja estas tres
-piezas como decisiones explícitas, no como detalles de implementación.
-
-## 1. Qué se creó en el repo (`oms-auditor/vercel-app/`)
-
-| Archivo | Reemplaza a (variante AWS) |
+| Archivo | Qué hace |
 |---|---|
-| `api/audit/run.js` (POST, `x-internal-key`) | `AuditFunction` |
-| `api/audit-results/[clientId].js` (GET, sesión o `x-internal-key`) | `QueryFunction` |
-| `api/cron/dispatch.js` (GET, `CRON_SECRET`) | `DispatcherFunction` + su EventBridge rule |
-| `vercel.json` (`crons`) | EventBridge Rule |
-| `lib/db.js` (Postgres vía Neon) | tabla DynamoDB |
-| `lib/secrets.js` (sin cambios, sigue siendo AWS Secrets Manager) | igual |
-| `lib/auth.js` + `api/login.js` + `api/logout.js` + `public/login.html` | API Gateway `AWS_IAM`/Cognito |
-| `public/*` (dashboard estático) | `dashboard/` de la variante AWS — mismo HTML/CSS/JS, misma identidad visual |
-| `sql/schema.sql` | definición de la tabla DynamoDB en `template.yaml` |
+| `public/index.html` + `public/app.js` | Dashboard con un formulario (nombre del cliente + `janis-api-key` + `janis-api-secret` + `janis-client`) que llama a `/api/audit/run` y renderiza el resultado en la misma pantalla. Limpia los campos de credenciales apenas termina la auditoría. |
+| `api/audit/run.js` | POST, recibe las 4 credenciales en el body, corre `auditClient` y devuelve el resultado. No persiste nada. Protegido por sesión de dashboard. |
+| `lib/audit.js` | Misma lógica de evaluación que las otras dos variantes (motor `capability-engine.js` sin cambios), ahora recibe las credenciales por parámetro en vez de buscarlas. |
+| `lib/auth.js` + `api/login.js` / `logout.js` / `session.js` + `public/login.html` | Gate de acceso al dashboard (ver sección 3) — sigue siendo necesario aunque no haya secretos persistidos, porque este endpoint de todas formas ejecuta llamadas reales a producción de Janis con lo que le pasen. |
 
-La variante AWS (`template.yaml`, `lambda/`, `dashboard/`, `capabilities/`,
-`reference/`) **se dejó intacta en el repo**, ya revisada y con sus propios
-tests en verde — no se borró nada. Si más adelante confirmás que Vercel es
-la única arquitectura que va a producción, se puede retirar esa carpeta en
-un commit aparte.
+Ya no hay: `lib/db.js`, `lib/secrets.js`, `sql/schema.sql`, `api/cron/`,
+`api/audit-results/`, `vercel.json` (crons) — se borraron porque dejaron
+de tener sentido con este diseño. Las variantes AWS SAM y "Vercel +
+Postgres" (la primera versión de esta carpeta) quedan documentadas en
+`docs/DEPLOYMENT_PLAN.md` si en algún momento se necesita volver a un
+modelo con auditoría programada.
 
-## 2. Secretos de cliente: por qué siguen en AWS Secrets Manager
+## 2. Por qué el gate de login sigue siendo necesario
 
-`lib/secrets.js` es el mismo archivo que usa la variante AWS, sin cambios.
-El proyecto de Vercel necesita, como env vars:
+Aunque no se guarda nada, `/api/audit/run` sigue siendo un endpoint que,
+con las credenciales correctas, **hace requests reales contra
+oms.janis.in/dom.janis.in/etc. de producción**. Dejarlo público sin
+ningún control equivaldría a ofrecer un proxy anónimo hacia las APIs de
+Janis: cualquiera con una credencial robada podría usarlo para probarla
+sin dejar rastro en sus propios logs, o alguien podría intentar
+credenciales al voleo contra él. Por eso:
 
-```
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=us-east-1
-```
+- **Control principal (no negociable):** habilitar **Deployment
+  Protection** (Vercel Authentication o Password Protection) en Project
+  Settings antes de que este proyecto sea alcanzable por nadie.
+- **Defensa en profundidad (ya en el código):** `api/login.js` con una
+  passphrase compartida (`DASHBOARD_ACCESS_PASSWORD_HASH`) + cookie de
+  sesión firmada de 12hs. Esto es un gate de equipo, no login individual
+  — si más adelante Janis quiere auditoría de "quién corrió qué auditoría
+  para qué cliente", hace falta SSO real (NextAuth + el proveedor que use
+  Janis internamente) en vez de esta passphrase compartida. Pendiente de
+  tu decisión, no lo armé por no saber qué proveedor usan.
 
-de un **usuario IAM dedicado** (no el mismo rol que usan los Lambdas) con
-una policy de mínimo privilegio:
+## 3. Las credenciales tipeadas — qué garantías tiene el código
 
-```json
-{
-  "Effect": "Allow",
-  "Action": "secretsmanager:GetSecretValue",
-  "Resource": "arn:aws:secretsmanager:*:*:secret:janis/clients/*/app-credentials-*"
-}
-```
+- Viajan del navegador al backend por HTTPS, en el body de un POST — nunca
+  por query string ni headers logueables por intermediarios.
+- `lib/audit.js` las recibe como parámetro, las usa exclusivamente para
+  armar los headers de las 10 llamadas a Janis, y no las guarda en ninguna
+  variable de módulo ni las pasa a ningún sistema de logging.
+- `capability-engine.js` (sin cambios respecto a las otras variantes)
+  nunca incluye headers ni body de request en los mensajes de error que
+  arma — si una llamada a Janis falla, el mensaje es del estilo
+  `Error 403 llamando a /audit-rule`, nunca vuelca la credencial usada.
+- El test `tests/audit.test.js` corre `auditClient` con una credencial de
+  prueba y confirma que no aparece en el resultado serializado.
+- El frontend (`public/app.js`) limpia los 3 campos de credenciales del
+  formulario apenas la request termina (éxito o error).
 
-Esto es honesto sobre un trade-off: esas dos env vars de Vercel *son* en sí
-mismas una credencial sensible (dan acceso a leer todos los secrets de
-clientes). Vercel encripta las env vars en reposo y no las expone en
-logs/build output, pero no tiene el mismo modelo de auditoría por-recurso
-que Secrets Manager. Si esto no es aceptable para el equipo de seguridad,
-la alternativa es no migrar la lectura de secretos a Vercel y mantener
-*solo* esa pieza como una AWS Lambda liviana que Vercel invoca por HTTP —
-avisame si preferís esa variante intermedia.
+Lo que el código **no** puede garantizar: qué hace el navegador del
+usuario con esos valores mientras están tipeados (extensiones, autofill,
+etc.) — los inputs son `type="password"` y `autocomplete="off"`, que es el
+máximo control razonable del lado del cliente.
 
-## 3. Maestro de clientes activos — mismo pendiente que en AWS
+## 4. Qué se validó en este entorno (sin cuenta de Vercel)
 
-`ACTIVE_CLIENTS` (env var, CSV de `clientId`s) — placeholder, nunca
-clientes reales commiteados. Mismo motivo que en la variante AWS: no hay
-endpoint confirmado de `commerce`/`accounts`. Actualizar en Vercel Project
-Settings -> Environment Variables después del deploy.
+Corrí un servidor Node local que sirve `public/` y monta los mismos
+handlers de `api/` (con `fetch` global mockeado para no pegarle a
+producción), y validé con Playwright el flujo completo:
 
-## 4. Autenticación del dashboard — control principal + defensa en profundidad
+1. Login con passphrase → cookie de sesión.
+2. `GET /api/session` con la cookie → autenticado.
+3. Formulario completo → `POST /api/audit/run` → las 10 capacidades
+   evaluadas se muestran con ✓/✕ y "Lo usa"/"No lo usa".
+4. Los campos de credenciales quedan vacíos después de la respuesta.
 
-**Control principal (no negociable, hacelo vos en el dashboard de Vercel
-antes de cargar cualquier dato real):**
-
-> Project Settings -> Deployment Protection -> **Vercel Authentication**
-> (o **Password Protection** si tu plan no incluye SSO por rol). Esto
-> bloquea *toda* request a nivel de edge antes de que llegue al código —
-> incluida la API.
-
-**Defensa en profundidad (ya implementada en el código):**
-`api/login.js` compara un hash SHA-256 de una passphrase interna
-(`DASHBOARD_ACCESS_PASSWORD_HASH`) y, si matchea, setea una cookie
-HttpOnly firmada (HMAC, `SESSION_SECRET`) que `api/audit-results/*`
-exige para servir datos. Esto es un gate compartido (una sola
-passphrase para todo el staff), **no reemplaza SSO real por persona** —
-si más adelante Janis quiere login individual (para tener quién-vio-qué
-auditable), la alternativa es reemplazar `lib/auth.js` por NextAuth con
-el proveedor SSO que use Janis internamente — pendiente de tu decisión,
-no lo armé porque no sé qué proveedor usan.
-
-`INTERNAL_API_KEY` y `CRON_SECRET` son para llamadas server-to-server
-(nunca las usa un navegador): el cron de Vercel manda `CRON_SECRET`
-automáticamente si la env var está configurada en el proyecto.
+`npm test` (23 tests: `capability-engine`, `auth`, `audit`) — **23/23 en
+verde**, sin red ni AWS.
 
 ## 5. Orden de despliegue sugerido (lo tenés que ejecutar vos)
 
 ```bash
 cd oms-auditor/vercel-app
-vercel login                      # tu cuenta, no la mía
-vercel link                       # crea/vincula el proyecto
-# Agregar la integración de Postgres (Neon) desde Vercel Marketplace
-# en el dashboard del proyecto -> Storage -> Connect Database.
-# Correr sql/schema.sql contra esa base (Vercel dashboard -> Query, o psql).
-
-vercel env add AWS_ACCESS_KEY_ID
-vercel env add AWS_SECRET_ACCESS_KEY
-vercel env add AWS_REGION
-vercel env add INTERNAL_API_KEY
-vercel env add CRON_SECRET
+vercel login
+vercel link
 vercel env add SESSION_SECRET
-vercel env add DASHBOARD_ACCESS_PASSWORD_HASH
-vercel env add ACTIVE_CLIENTS        # placeholder al principio
-
-vercel deploy                     # preview, para validar
-# Habilitar Deployment Protection ANTES de cargar cualquier secret real de cliente
-# Cargar secrets de un cliente de prueba en Secrets Manager (fuera de Vercel)
-npm run test:integration:qa       # (ver oms-auditor/tests/integration, mismo test que la variante AWS)
-
-vercel deploy --prod              # recién acá, con tu confirmación explícita
+vercel env add DASHBOARD_ACCESS_PASSWORD_HASH   # sha256 hex de la passphrase, ver .env.example
+vercel deploy                     # preview
+# Habilitar Deployment Protection ANTES de compartir la URL con nadie
+vercel deploy --prod              # con tu confirmación explícita
 ```
 
-## 6. Límites a tener en cuenta
+No hay paso de base de datos, no hay usuario IAM, no hay secrets que
+cargar de antemano — es el deploy más simple de las tres variantes que
+armamos.
 
-- **Timeout de función**: `api/cron/dispatch.js` audita clientes con
-  concurrencia 4 en la misma invocación. Con pocos clientes (<~20) y las
-  10 capacidades actuales, no debería acercarse al límite del plan
-  (10s Hobby / hasta 300s+ Pro con Fluid Compute), pero si la lista de
-  clientes activos crece mucho, hay que migrar a una cola (Upstash QStash
-  u otra) en vez de auditar todo en una sola invocación — quedó anotado
-  como comentario en el propio archivo.
-- **Sin TTL nativo**: la limpieza de histórico depende de que el cron
-  corra (una vez por día); si el cron se desactiva por mucho tiempo, la
-  tabla crece sin el corte automático que sí tenía DynamoDB.
+## 6. Confirmación pendiente antes de producción
 
-## 7. Tests
-
-- `npm test` en `vercel-app/` — 22/22 en verde (`capability-engine` +
-  `auth`), corridos en este entorno, sin red ni AWS.
-- El test de integración contra QA es el mismo de la variante AWS
-  (`oms-auditor/tests/integration/qa-audit.integration.test.js`) — la
-  lógica de `auditClient` es la misma, solo cambia dónde persiste.
-  Sigue pendiente de correr por falta de credenciales AWS + cliente de
-  prueba real en este entorno de trabajo.
-
-## 8. Confirmación pendiente antes de producción
-
-1. Tu decisión sobre la sección 2 (secretos vía AWS desde Vercel, sí/no).
-2. Habilitar Deployment Protection antes de cargar cualquier dato real.
-3. Correr el test de integración contra QA en verde.
-4. Completar `ACTIVE_CLIENTS` con la lista real.
-5. Tu `vercel deploy --prod` (o pasarme un `VERCEL_TOKEN` acotado si querés que lo dispare yo).
+1. Habilitar Deployment Protection antes de que la URL sea alcanzable por nadie fuera del equipo.
+2. Definir si el gate de passphrase compartida es aceptable o si hace falta SSO individual (sección 2).
+3. Tu `vercel deploy --prod` (o pasarme un `VERCEL_TOKEN` acotado si querés que lo dispare yo).

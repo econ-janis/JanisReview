@@ -3,6 +3,12 @@
 /**
  * Autenticación para la variante Vercel.
  *
+ * Esta variante no persiste credenciales de cliente ni resultados (el
+ * usuario tipea appKey/appSecret/janisClient en el formulario y se usan
+ * una sola vez — ver lib/audit.js). Lo único que hay que proteger es
+ * quién puede *entrar* a tirar auditorías on-demand contra producción de
+ * Janis con las credenciales que traiga.
+ *
  * Vercel no tiene un equivalente directo a Cognito/IAM auth de API
  * Gateway. Esta capa es DEFENSA EN PROFUNDIDAD, no el control principal:
  * el control principal recomendado es "Deployment Protection" de Vercel
@@ -10,15 +16,9 @@
  * dashboard del proyecto y bloquea requests a nivel de edge, antes de que
  * lleguen a este código. Ver docs/DEPLOYMENT_PLAN_VERCEL.md.
  *
- * Tres mecanismos, cada uno para un caller distinto:
- *  - requireInternalKey: llamadas server-to-server (el cron invocando el
- *    endpoint de auditoría por cliente). Header `x-internal-key`.
- *  - requireCronSecret: el propio Vercel Cron invocando /api/cron/dispatch.
- *    Vercel manda `Authorization: Bearer ${CRON_SECRET}` automáticamente
- *    si la env var CRON_SECRET está configurada.
- *  - sesión de dashboard: cookie HttpOnly firmada (HMAC-SHA256), para el
- *    humano que entra a /dashboard vía /login. NUNCA reemplaza SSO real —
- *    ver "Decisión pendiente: auth del dashboard" en el plan.
+ * Sesión de dashboard: cookie HttpOnly firmada (HMAC-SHA256), para el
+ * humano que entra a /dashboard vía /login. NUNCA reemplaza SSO real —
+ * ver "Decisión pendiente: auth del dashboard" en el plan.
  */
 
 const crypto = require('crypto');
@@ -39,27 +39,6 @@ function requireEnv(name) {
     throw new Error(`Falta la env var ${name}`);
   }
   return value;
-}
-
-function requireInternalKey(req) {
-  const provided = req.headers['x-internal-key'];
-  const expected = requireEnv('INTERNAL_API_KEY');
-  if (!provided || !timingSafeEqual(provided, expected)) {
-    const err = new Error('x-internal-key inválida o ausente');
-    err.statusCode = 401;
-    throw err;
-  }
-}
-
-function requireCronSecret(req) {
-  const expected = requireEnv('CRON_SECRET');
-  const header = req.headers.authorization || '';
-  const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (!provided || !timingSafeEqual(provided, expected)) {
-    const err = new Error('Authorization de cron inválida o ausente');
-    err.statusCode = 401;
-    throw err;
-  }
 }
 
 /** Firma un token de sesión: `${expiresAt}.${hmac}` */
@@ -124,8 +103,6 @@ function requireDashboardSession(req) {
 
 module.exports = {
   SESSION_COOKIE_NAME,
-  requireInternalKey,
-  requireCronSecret,
   createSessionToken,
   verifySessionToken,
   parseCookies,

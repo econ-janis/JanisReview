@@ -1,11 +1,9 @@
 'use strict';
 
 const capabilitiesSpec = require('../capabilities/oms-capabilities.json');
-const { getClientCredentials } = require('./secrets');
 const { extractActualValue, evaluateCapability, callJanisEndpointPaginated } = require('./capability-engine');
-const { saveAuditResults } = require('./db');
 
-const JANIS_API_BASE_URL_BY_MODULE = {
+const DEFAULT_BASE_URLS = {
   oms: process.env.JANIS_OMS_API_BASE_URL || 'https://oms.janis.in/api',
   dom: process.env.JANIS_DOM_API_BASE_URL || 'https://dom.janis.in/api',
   delivery: process.env.JANIS_DELIVERY_API_BASE_URL || 'https://delivery.janis.in/api',
@@ -14,12 +12,16 @@ const JANIS_API_BASE_URL_BY_MODULE = {
 };
 
 /**
- * Misma lógica que lambda/audit/index.js (variante AWS): evalúa las 10
- * capacidades del spec para un clientId y persiste el resultado. Acá el
- * "persiste" va a Postgres en vez de DynamoDB (ver lib/db.js).
+ * Corre la auditoría de las 10 capacidades usando credenciales que el
+ * usuario tipeó en el formulario del dashboard — NUNCA se leen de Secrets
+ * Manager ni de ningún otro lugar, y NUNCA se persisten (ni las
+ * credenciales ni el resultado): se usan una sola vez, en memoria, para
+ * esta request, y se descartan al responder.
+ *
+ * `credentials` = { appKey, appSecret, janisClient } — validado por el
+ * caller (ver api/audit/run.js) antes de llegar acá.
  */
-async function auditClient(clientId) {
-  const credentials = await getClientCredentials(clientId);
+async function auditClient(clientId, credentials, { baseUrlByModule = DEFAULT_BASE_URLS } = {}) {
   const results = [];
 
   for (const capability of capabilitiesSpec.capabilities) {
@@ -32,7 +34,7 @@ async function auditClient(clientId) {
         capability.endpoint,
         capability.modulo_real,
         credentials,
-        { baseUrlByModule: JANIS_API_BASE_URL_BY_MODULE }
+        { baseUrlByModule }
       );
       actualValue = extractActualValue(
         data,
@@ -40,6 +42,8 @@ async function auditClient(clientId) {
       );
       ok = evaluateCapability(actualValue, capability.expected);
     } catch (err) {
+      // El mensaje de callJanisEndpointPaginated nunca incluye headers ni
+      // credenciales (ver capability-engine.js) — seguro de propagar tal cual.
       error = err.message;
     }
 
@@ -56,13 +60,10 @@ async function auditClient(clientId) {
     });
   }
 
-  const auditedAt = new Date().toISOString();
-  await saveAuditResults(clientId, auditedAt, results);
-
   return {
     clientId,
     module: capabilitiesSpec.module,
-    auditedAt,
+    auditedAt: new Date().toISOString(),
     results,
     resumen: {
       total: results.length,

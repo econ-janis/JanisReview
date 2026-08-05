@@ -11,8 +11,8 @@ Hay **dos variantes de infraestructura** sobre la misma fuente de verdad
 
 | Variante | Carpeta | Estado |
 |---|---|---|
-| AWS (SAM: Lambda + DynamoDB + API Gateway) | `template.yaml`, `lambda/`, `dashboard/` | Construida primero, 16/16 tests unitarios en verde. No desplegada. |
-| Vercel (Serverless Functions + Postgres/Neon) | `vercel-app/` | Pivot pedido después — ver su propio README. 22/22 tests en verde. No desplegada. Sigue usando AWS Secrets Manager solo para credenciales de cliente (Vercel no tiene equivalente). |
+| AWS (SAM: Lambda + DynamoDB + API Gateway) | `template.yaml`, `lambda/`, `dashboard/` | Credenciales pre-cargadas en Secrets Manager por cliente, auditoría programada 1x/día. Construida primero, 16/16 tests en verde. No desplegada. |
+| Vercel, on-demand sin persistencia | `vercel-app/` | El usuario tipea `janis-api-key`/`janis-api-secret` en el dashboard en cada auditoría — no hay Secrets Manager, no hay base de datos, no hay auditoría programada (sin credencial guardada no hay con qué correrla sola). 23/23 tests en verde. No desplegada. |
 
 > ⚠️ Ninguna de las dos se desplegó contra una cuenta real. Ver
 > **[docs/DEPLOYMENT_PLAN.md](docs/DEPLOYMENT_PLAN.md)** (AWS) o
