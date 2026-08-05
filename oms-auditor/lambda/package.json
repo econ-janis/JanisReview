@@ -1,0 +1,16 @@
+{
+  "name": "oms-auditor-lambdas",
+  "version": "0.2.0",
+  "description": "Paquete único para los 3 Lambdas del auditor (audit, query, dispatcher) + código compartido en shared/. Se empaquetan juntos (mismo CodeUri en template.yaml, un Handler por función) para poder usar require('../shared/...') sin bundler.",
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.600.0",
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "@aws-sdk/client-ssm": "^3.600.0",
+    "@aws-sdk/client-lambda": "^3.600.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,1809 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "description": "Handle orders to optimize fulfillment, so orders arrive to customers on best time while incurring the lowest possible cost.\n\n **Last update**: 05 ago 26, 02:02 p. m.",
+    "title": "Distributed Order Management (DOM)",
+    "version": "1.87.2",
+    "x-logo": null,
+    "x-janis-keywords": [
+      "Order",
+      "Delivery",
+      "Shipping",
+      "Picking"
+    ],
+    "lastUpdate": "2026-08-05T14:02:17.319Z"
+  },
+  "tags": [
+    {
+      "name": "Decisions",
+      "x-traitTag": true,
+      "description": "This is the documentation for every decision that the DOM makes. You will find the same **Code** in a fulfillment plan ledger.\n\nIn the following table, you can understand better the meaning of each decision, when happens and what you can do to change the decision made by Janis DOM.\n\n| Code | Message | Explanation |\n| --- | --- | --- |\n| **PIC001** | Skipping picking simulation because order has external picking enabled | When the order [Sales channel](https://app.janis.in/commerce/sales-channel/browse) has the **External Picking** setting enabled, the DOM will not include picking nor stock validation in the fulfillment plan. You can find the Sales Channels IDs in the decision metadata |\n| **PIC002** | Skipping stock simulation because delivery simulation returned only one warehouse | When the delivery simulation returns one and only one available warehouse, then stock check and found rate priorization is skipped because it would have no impact. You can find the available warehouse in the decision metadata. |\n| **PIC003** | Skipping picking simulation because order has already been picked | When the order has already been picked, the DOM will not include picking nor stock validation in the fulfillment plan. |\n| **PIC004** | Creating picking Wave because it does not exist yet | When the best plan includes a picking wave that is still empty, the DOM will create it. You can find the Wave information such as the date range in the decision metadata. |\n| **PIC005** | Adding order items to picking wave | When the picking process is made using Janis Picking (external picking disabled), items are added to Picking Waves to organize them. You can find the information such as Wave ID and which items where added in the decision metadata. |\n| **PIC006** | No items in the order are present in Janis Catalog. Stock and warehouse priority by product group cannot be applied. | There is no product in the order that is present in Janis Catalog. Therefore, stock cannot be checked and warehouse preference by product group cannot be applied either. Picking will be planned in the same warehouse of the delivery. |\n| **PIC007** | Creating picking Session because Picking point does not have a window schema | When the Picking point selected for the fulfillment plan does not have a Window schema associated, sessions are automatically created without assigning a Picking wave to them. |\n| **PIC008** | There are no Picking Points available that can pick items | If there are no eligible warehouses to process item picking available, the process will fail. See known errors for more information on how you can fix this. |\n| **DEL001** | Fulfillment plan switched from X to Y because order has no available data | When the order's shipping lacks of information to honor the fulfillment plan restrictions, then it will switch to the next available restriction. See the decision metadata to analyze the shipping available data. <br/>You can view and edit Delivery restriction in [DOM Settings](https://app.janis.in/dom/setting/edit#fulfillmentPlan) |\n| **DEL002** | Creating a shipping to deliver the order | A shipping is created so you can process the delivery of the order. You can find the Shipping information in the decision metadata. |\n| **DEL003** | Carrier is restricted to Sales Channels that do not include the order\\'s Sales Channel | A carrier that could deliver the order is being discarded due to Sales Channel restriction. Carrier and Order SC data can be found in decision metadata. To change SC restriction, edit the [Carrier](https://app.janis.in/delivery/carrier/browse) |\n| **GEN001** | Manually retrying fulfillment plan | This indicates that a failed fulfillment plan was manually retried |\n| **GEN002** | A delivery option is being analized to check picking possibilities | This indicates that a possible fulfillment plan is being analyzed. You can see the plan details in the metadata |\n| **GEN003** | A delivery option found rate has been computed | This indicates that the found rate of a possible fulfillment plan has been computed. You can see the found rate in the metadata |\n| **CAT001** | A product is not present in Janis Catalog. Stock and warehouse priority by product group cannot be applied. | This happens when an item of the order is not present in Janis Catalog. This item will be assigned based on the planning of other items if the order |\n| **CAT002** | A product does not have preferred warehouses based on it\\'s product groups and is out of stock. It will be assigned without preferences. | This happens when an item of the order is out of stock and has no preferred warehouses. This item will be assigned based on the planning of other items if the order |\n| **CAT004** | A product has product only one regular (not preferred) warehouse with stock available. It will be asigned to it. | This happens when an item of the order is has no preferred warehouses but has stock only in one warehouse. This item will be assigned to that warehouse |\n| **CAT005** | A product has multiple warehouses with stock available. It was asigned to one of them that was already in the fulfillment plan. | This happens when an item of the order has more than one warehouses with available stock, and at least one of them is already present in the plan. This item will be assigned to that warehouse |\n| **CAT006** | A product has multiple warehouses with stock available. It was asigned to one of them that was not already in the fulfillment plan. | This happens when an item of the order has more than one warehouses with available stock, but none of them is already present in the plan. This item will be assigned to the warehouse with higher found rate between products in the same condition |\n| **CAT007** | A product is out of stock and has preferred warehouses. It was asigned to one of them that was already in the fulfillment plan. | This happens when an item of the order is out of stock, but has at least one preferred warehouse already in the plan. This item will be assigned this warehouse |\n| **CAT008** | A product is out of stock and has no preferred warehouses. It was asigned to a warehouse was already in the fulfillment plan or to the first available warehouse. | This happens when an item of the order is out of stock, but has no preferred warehouses (or they are all out of stock) already in the plan. This item will be assigned to the first warehouse present in the plan, or to the first available picking point if the plan is still empty |\n| **CAT009** | A product does not have stock availability to fulfill the purchased quantity, but has partial stock available. | This happens when an item of the order does not have stock in any warehouse to fulfill the purchased quantity, but one or more warehouses has a lower quantity of stock available. This warehouses will be prioritized over warehouses without stock. |\n| **CAT010** | The found rate of products does not reach the minimum, they will be re-evaluated omitting the preferences they have. | This happens when the generated option does not exceed the configured minimum found rate, and the items must be re-evaluated omitting their preferences per warehouse. |\n| **CAT011** | The found rate of products without preferences does not reach the minimum, they will be re-evaluated omitting the preferences they have and using the picking point with the highest priority. | This happens when the generated option does not exceed the configured minimum found rate and the products must be re-evaluated by omitting their warehouse preferences and using the highest priority pick point as the only viable option. |\n| **OMS001** | Splitting order due to multiple fulfillment warehouses that ship independently | When an order is planned to be fulfilled and shipped from different locations, the order is split to guarantee independent fulfillment process to each of them. |\n| **OMS002** | Split order removed, minimum amount not reached. | This can happen because the split does not reach the configured minimum amount. |\n| **OMS003** | Split order removed, maximum split reached. | This can happen because the configured limit of split has been exceeded. |\n| **WMS001** | Stock reservations will be created to lock available stock | When an order is planned to be fulfilled, the stock is reserved in the picking warehouse to prevent multiple plannings on the same stock. |\n| **ERR001** | `Variable message` | This indicates that an error ocurred when building the fulfillment plan. Check the decision `message` and search for **Known Errors** below |\n"
+    },
+    {
+      "name": "Known Errors",
+      "x-traitTag": true,
+      "description": "The following guide will show you the different errors that the DOM can encounter, what do they mean and how you can fix them.\n\nIn the following tables, you can find a description of each error and links to help you solve them.\n\n## InternalError\n\nEvery time an InternalError appears, it means that we had an issue while building the fulfillment plan. This issue may be fixed in a short period of time and automatic retries will take care for you. If errors persist, please contact support.\n\n## SourceError\n\nSource errors are related to some information of the order (source) that is missing and it's required in order to build a fulfillment plan.\n\n| Message | Explanation |\n| --- | --- |\n| Could not find plan `Plan ID` | This happens when a plan that doesn't exist is attempted to be retried |\n| Plan `Plan ID` status `Plan status` is invalid. Must be 'failed' to retry it | This happens when a plan that has failed is attempted to be retried |\n| Order does not have coordinates nor postal code | This happens when the delivery address of an order does not have a way to locate it (postal code or geocoordinates). <br/><br/> To solve this issue, you need to go to [Orders](https://app.janis.in/oms/order/browse), search the order with the issue, and then update it's address from the **Shipping** card actions. |\n| Order does not have pickupInfo with a valid warehouseRefId | This happens when an order with a delivery type of Store Pickup or Drive Thru does not have the information of which pickup point it should be delivered in. <br/><br/> To solve this issue, you need to go to [Orders](https://app.janis.in/oms/order/browse), search the order with the issue, and then update it's pickup point information from the **Shipping** card actions. |\n\n## DependencyError\n\nDependency errors are related to some information of related entities (dependencies), such as Carriers or Warehouses, that is missing and it's required in order to build a fulfillment plan.\n\n| Message | Explanation |\n| --- | --- |\n| There is not a warehouse in WMS with referenceId `Warehouse Reference ID` to use as pickup point | This happens when the pickup point in the order does not exist or is inactive. <br/><br/> To solve this issue, you have multiple options: <br/><br/> **1. Change the order's pickup point**: You can go to [Orders](https://app.janis.in/oms/order/browse), search the order with the issue, and then update it's pickup point information from the **Shipping** card actions. <br/> **2. Create or activate the warehouse**: Go to [Warehouses](https://app.janis.in/wms/warehouse/browse) and search the warehouse. If it's inactive, just set it to active. If it doesnt exist, go to [Locations](https://app.janis.in/commerce/location/browse) and add the warehouse to an existing or a new Location. |\n| Warehouse with referenceId `Warehouse Reference ID` is not related to the order sales channel `Sales Channel ID` | This happens when an order with a delivery type of Store Pickup or Drive Thru has a pickup point, but it is not associated to the order's Sales Channel. <br/><br/> To solve this issue, you have multiple options: <br/><br/> **1. Change the order's pickup point**: You can go to [Orders](https://app.janis.in/oms/order/browse), search the order with the issue, and then update it's pickup point information from the **Shipping** card actions. <br/> **2. Associate the pickup point to the sales channel**: You achieve this, go to [Warehouses](https://app.janis.in/wms/warehouse/browse), search the warehouse and add the Sales Channel to the **Sales channels** multiple selector. |\n| Warehouse `Warehouse Name` is invalid to Pickup. Task `Task name` is missing. | This happens when the Warehouse selected as pickup point is not configured to handle this kind of delivery. <br/><br/> To solve the issue, simply go to [Warehouses](https://app.janis.in/wms/warehouse/browse), search the warehouse and add the task specified by the error in the **Tasks** multiple selector. |\n| There is not a carrier in Delivery with the `Carrier Property` `Value` to process pickup | This happens when there is not a Carrier in Janis that matches the Delivery restriction. <br/> You can view and edit Delivery restriction in [DOM Settings](https://app.janis.in/dom/setting/edit#fulfillmentPlan) <br/><br/> To solve this issue, you have multiple options: <br/><br/> **1. Relate the location of the pickup point to a carrier**: You can go to [Carriers](https://app.janis.in/delivery/carrier/browse), search a Carrier that you want to be available and add the pickup point's Location to the **Location IDs** multiple selector. <br/> **2. Choose a looser Delivery restriction**: Change DOM Settings to `Shipping SLA` or `Shipping Type` and retry fulfillment plan. ⚠️ This will affect the Decisions made by the DOM, so check if this solution matches your needs. <br/> **3. Create a new Carrier**: In case the Carrier does not exist in Janis, just to go [Carriers](https://app.janis.in/delivery/carrier/browse) and create a new one that matches the Delivery restriction criteria. Don't forget to associate it to the pickup point's Location. ⚠️ If you use Janis with an ecommerce integration that imports Carriers, this option may not be recommended. |\n| All pickup available carriers are inactive: `Carrier names` | This happens when all carriers related to the pickup point are inactive. <br/><br/> To solve this issue, you can go to [Carriers](https://app.janis.in/delivery/carrier/browse) and set one of the carrier as active. <br/><br/> If this isn't valid for your use case, then try solutions for the previous error (\"There is not a carrier in Delivery with the `Carrier Property` `Value` to process pickup\"). |\n| There is not a shipping type in Delivery Service with ID `Shipping Type ID` | This error can happen by a misconfiguration of the Carriers. <br/><br/> To solve this issue, go to [Carriers](https://app.janis.in/delivery/carrier/browse) and double check that every Shipping Type is properly configured. |\n\n## AvailabilityError\n\nAvailability errors are related operational availability that prevents a fulfillment plan to be successfully built.\n\n| Message | Explanation |\n| --- | --- |\n| There are no carriers available to deliver the order | This happens when there is not an active Carrier that can deliver an order to the destination. <br/><br/> This can occur by various reasons, so you should check the following settings: <br/><br/>**1. There are no active carriers**: Check that there are active [Carriers](https://app.janis.in/delivery/carrier/browse?filters[status]=active)<br/>**2. There are no active carriers that match the delivery restriction**: Check the Delivery restriction in [DOM Settings](https://app.janis.in/dom/setting/edit#fulfillmentPlan) and search for active [Carriers](https://app.janis.in/delivery/carrier/browse?filters[status]=active) that match that restriction. If the restriction is set to `Carrier`, filter by the order's carrier ID. If the restriction is set to `Shipping SLA`, filter by the order's Shipping SLA Name (double check that a Shipping type with the exact `title` exists and is active). Otherwise, filter by the order's `Shipping Type`.<br/>**3. Carriers coverage area does not include the dropoff point**: Among the Carriers found in the previous step, check that they have a Coverage area set, and that it includes the order's delivery address.<br/>**4. Carriers coverage area does not include any location that can deliver the order**: Among the Carriers found in the previous step, check that they have a Coverage area set, and that it includes at least one of the locations related to the carrier. Also check that those [Locations](https://app.janis.in/commerce/location/browse) are active and have an active Warehouse with the appropriate `tasks` set (`Ships orders` in case of delivery, `Allows pickup` or `Allows drive through` in case of Store pickup or Drive through respectively), that have the order's Seller sales channel associated and that Seller restriction is empty or that it includes the order's Seller.<br/>**5. Carriers are restricted to a different Sales Channel**: Among the Carriers found in the previous step, check that they are not restricted to any Sales Channel, or that the order's Seller Sales Channel is included in that restriction.<br/>**6. Order's seller is restricted to some Delivery Companies**: If the order is not related to a seller (property `seller` is not present) you can skip this step. Go to [Sellers](https://app.janis.in/oms/seller/browse), search for the order's seller and check Delivery companies restriction. Be sure that restriction is empty or that it includes the companies of the carriers from the previous step.<br/>**7. Order items do not fit carrier phisical limitations**: If the carrier have restrictions set, check that sum of the order items dimensions (weight and volume) are between the allowed values (min/max weight and min/max volume)<br/> |\n| Could not find an available picking wave until `Picking deadline date`. Warehouses searched: `Warehouse names`. | [Basic engine only] This happens when no warehouse has an open Picking Wave available to pick the order before it's delivery date estimate or delivery window start. <br/><br/> To solve this issue, you have multiple options: <br/><br/> **1. Reschedule the order delivery**: You can go to [Orders](https://app.janis.in/oms/order/browse), search the order with the issue, and then reschedule it from the **Shipping** card actions. <br/> **2. Add more capacity**: Go to [Picking Waves](https://app.janis.in/picking/wave/browse), search for a Wave of an available Warehouse and before the order's delivery deadline, and change it's capacity to a higher number. |\n| Could not find available picking waves until `Picking deadline date` | [Advanced engine only] This happens when there is no fulfillment plan with open Picking Waves available to pick all the order before it's delivery date estimate or delivery window start. <br/><br/> To solve this issue, you have multiple options: <br/><br/> **1. Reschedule the order delivery**: You can go to [Orders](https://app.janis.in/oms/order/browse), search the order with the issue, and then reschedule it from the **Shipping** card actions. <br/> **2. Add more capacity**: Go to [Picking Waves](https://app.janis.in/picking/wave/browse), search for a Wave of an available Warehouse and before the order's delivery deadline, and change it's capacity to a higher number. |\n| There are no Picking Points available that can pick items. Please check that Warehouses tasks and Location geofences are configured correctly. | This happens when there are no eligible warehouses with the `pickProducts` set. <br/><br/> To solve this issue, you have multiple options: <br/><br/> **1. Set warehouse tasks**: You can go to [Warehouses](https://app.janis.in/wms/warehouse/browse), search the warehouse you want to be able to pick products, and add the `pickProducts` task to it. Then retry fulfillment plan process. <br/> **2. Set/Fix geofences**: [Advanced engine only] If you want to pick products in one location and delivery in anotherone, you can go to [Geofences](https://app.janis.in/commerce/geofence/browse), and set-up a Geofence that contains both Locations. Then check that the contained Warehouses have the appropriate tasks set to pick and deliver orders. Once it is all set, retry the order fulfillment plan process. <br/><br/> Also, check your locations `status` to ensure that they are not `inactive`. |\n"
+    },
+    {
+      "name": "Fulfillment Plan",
+      "description": "For monitoring and debugging fulfilment plans"
+    },
+    {
+      "name": "Settings",
+      "description": "For managing the settings"
+    }
+  ],
+  "x-tagGroups": [
+    {
+      "name": "Decision ledger",
+      "tags": [
+        "Decisions",
+        "Known Errors"
+      ]
+    },
+    {
+      "name": "Settings",
+      "tags": [
+        "Settings"
+      ]
+    },
+    {
+      "name": "Fulfillment",
+      "tags": [
+        "Fulfillment Plan",
+        "Fulfillment Profile"
+      ]
+    },
+    {
+      "name": "Debug",
+      "tags": [
+        "Step Logs"
+      ]
+    },
+    {
+      "name": "Other",
+      "tags": [
+        "Export",
+        "Client",
+        "Event Listeners"
+      ]
+    }
+  ],
+  "servers": [
+    {
+      "url": "https://dom.janis.in/api",
+      "description": "The Prod API server",
+      "variables": {
+        "environment": {
+          "default": "prod"
+        }
+      }
+    },
+    {
+      "url": "https://dom.janisqa.in/api",
+      "description": "The QA API server",
+      "variables": {
+        "environment": {
+          "default": "qa"
+        }
+      }
+    },
+    {
+      "url": "https://dom.janisdev.in/api",
+      "description": "The Beta API server",
+      "variables": {
+        "environment": {
+          "default": "beta"
+        }
+      }
+    },
+    {
+      "url": "http://dom.janis.localhost:3057/api",
+      "description": "The Local API server",
+      "variables": {
+        "environment": {
+          "default": "local"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/fulfillment-plan/{id}": {
+      "get": {
+        "x-janis-namespace": "fulfillment-plan",
+        "x-janis-method": "get",
+        "x-janis-permissions": [
+          "dom:fulfillment-plan:read"
+        ],
+        "operationId": "getFulfillmentPlan",
+        "tags": [
+          "Fulfillment Plan"
+        ],
+        "summary": "Get a Fulfillment Plan",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fulfillment Plan found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentPlanWithLedger"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/fulfillment-plan": {
+      "get": {
+        "x-janis-namespace": "fulfillment-plan",
+        "x-janis-method": "list",
+        "x-janis-permissions": [
+          "dom:fulfillment-plan:read"
+        ],
+        "operationId": "listFulfillmentPlans",
+        "tags": [
+          "Fulfillment Plan"
+        ],
+        "summary": "List Fulfillment Plans",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FulfillmentPlanSortBy"
+          },
+          {
+            "$ref": "#/components/parameters/ListSortDirection"
+          },
+          {
+            "$ref": "#/components/parameters/FulfillmentPlanFilters"
+          },
+          {
+            "$ref": "#/components/parameters/ListPageNumber"
+          },
+          {
+            "$ref": "#/components/parameters/ListPageSize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fulfillment Plans listed",
+            "headers": {
+              "x-janis-total": {
+                "$ref": "#/components/headers/x-janis-total"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentPlanList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/fulfillment-profile/{id}": {
+      "get": {
+        "x-janis-namespace": "fulfillment-profile",
+        "x-janis-method": "get",
+        "x-janis-permissions": [
+          "dom:fulfillment-profile:read"
+        ],
+        "operationId": "getFulfillmentProfile",
+        "tags": [
+          "Fulfillment Profile"
+        ],
+        "summary": "Get a Fulfillment Profile:",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fulfillment Profile found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "put": {
+        "x-janis-namespace": "fulfillment-profile",
+        "x-janis-method": "update",
+        "x-janis-permissions": [
+          "dom:fulfillment-profile:write"
+        ],
+        "operationId": "updateFulfillmentProfile",
+        "tags": [
+          "Fulfillment Profile"
+        ],
+        "summary": "Update a Fulfillment Profile",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "description": "A Fulfillment Profile",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentProfile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The fulfillment profile was updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/components/schemas/id"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/fulfillment-profile": {
+      "get": {
+        "x-janis-namespace": "fulfillment-profile",
+        "x-janis-method": "list",
+        "x-janis-permissions": [
+          "dom:fulfillment-profile:read"
+        ],
+        "operationId": "listFulfillmentProfiles",
+        "tags": [
+          "Fulfillment Profile"
+        ],
+        "summary": "List Fulfillment Profiles",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FulfillmentProfileSortBy"
+          },
+          {
+            "$ref": "#/components/parameters/ListSortDirection"
+          },
+          {
+            "$ref": "#/components/parameters/FulfillmentProfileFilters"
+          },
+          {
+            "$ref": "#/components/parameters/ListPageNumber"
+          },
+          {
+            "$ref": "#/components/parameters/ListPageSize"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fulfillment Profiles listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentProfileList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "post": {
+        "x-janis-namespace": "fulfillment-profile",
+        "x-janis-method": "create",
+        "x-janis-permissions": [
+          "dom:fulfillment-profile:write"
+        ],
+        "operationId": "createFulfillmentProfile",
+        "tags": [
+          "Fulfillment Profile"
+        ],
+        "summary": "Create a Fulfillment Profile",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "requestBody": {
+          "description": "A Fulfillment Profile",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentProfile"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The fulfillment profile was created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/components/schemas/id"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/new-order-distribution/{id}": {
+      "get": {
+        "x-janis-namespace": "new-order-distribution",
+        "x-janis-method": "get",
+        "x-janis-permissions": [
+          "dom:new-order-distribution:read"
+        ],
+        "operationId": "getNewOrderDistribution",
+        "tags": [
+          "New Order Distribution"
+        ],
+        "summary": "Get New Order's distribution",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "example": "d555345345345as67a342a"
+            },
+            "required": true,
+            "description": "The unique identifier of newOrderDistribution item"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The New Order Distribution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewOrderDistribution"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/new-order-distribution": {
+      "get": {
+        "x-janis-namespace": "new-order-distribution",
+        "x-janis-method": "list",
+        "x-janis-permissions": [
+          "dom:new-order-distribution:read"
+        ],
+        "operationId": "listNewOrderDistribution",
+        "tags": [
+          "New Order Distribution"
+        ],
+        "summary": "List New Order's distribution",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The New Order Distribution List",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewOrderDistributionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/setting/{entity}": {
+      "get": {
+        "x-janis-namespace": "setting",
+        "x-janis-method": "get",
+        "x-janis-permissions": [
+          "dom:setting:read"
+        ],
+        "operationId": "getSetting",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Get the setting of an entity",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entity",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "example": "entityName"
+            },
+            "required": true,
+            "description": "The name of the entity that owns the settings to be retrieved"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings were retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A key-value object of the settings",
+                  "additionalProperties": true,
+                  "example": {
+                    "allowSomething": true,
+                    "defaultStatus": "active"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "put": {
+        "x-janis-namespace": "setting",
+        "x-janis-method": "update",
+        "x-janis-permissions": [
+          "dom:setting:write"
+        ],
+        "operationId": "updateSetting",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Update the setting of an entity",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entity",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "example": "entityName"
+            },
+            "required": true,
+            "description": "The name of the entity that owns the settings to be updated"
+          }
+        ],
+        "requestBody": {
+          "description": "The settings configurations",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "A key-value object of the settings",
+                "additionalProperties": true,
+                "example": {
+                  "allowSomething": true,
+                  "defaultStatus": "active"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings were updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/setting/fulfillmentplan": {
+      "get": {
+        "x-janis-namespace": "setting",
+        "x-janis-method": "get",
+        "x-janis-permissions": [
+          "dom:setting:read"
+        ],
+        "operationId": "getFulfillmentPlanSettings",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Fulfillment plan: Get settings",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings were retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FulfillmentPlanSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "put": {
+        "x-janis-namespace": "setting",
+        "x-janis-method": "update",
+        "x-janis-permissions": [
+          "dom:setting:write"
+        ],
+        "operationId": "updateFulfillmentPlanSettings",
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Fulfillment plan: Update settings",
+        "security": [
+          {
+            "ApiKey": [],
+            "ApiSecret": [],
+            "JanisClient": []
+          }
+        ],
+        "requestBody": {
+          "description": "The fulfillment plan configurations",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FulfillmentPlanSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings were updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "id": {
+        "description": "The unique identifier of the item",
+        "type": "string",
+        "readOnly": true,
+        "example": "d555345345345as67a342a"
+      },
+      "dateCreated": {
+        "description": "The date of creation",
+        "type": "string",
+        "format": "date-time",
+        "readOnly": true,
+        "example": "2019-07-12T19:59:51.801Z"
+      },
+      "dateModified": {
+        "description": "The date of the last modification",
+        "type": "string",
+        "format": "date-time",
+        "readOnly": true,
+        "example": "2019-07-20T19:59:51.801Z"
+      },
+      "userCreated": {
+        "description": "The ID of the user who created the item",
+        "type": "string",
+        "readOnly": true,
+        "example": "6a1fc1eeb5b68406e0487a10"
+      },
+      "userModified": {
+        "description": "The ID of the user who last modified the item",
+        "type": "string",
+        "readOnly": true,
+        "example": "7e1fc1eeb5b68406e048796"
+      },
+      "FulfillmentPlan": {
+        "type": "object",
+        "description": "A Fulfillment Plan",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/id"
+          },
+          "orderId": {
+            "type": "string",
+            "description": "The ID of the order associated to the plan",
+            "example": "bar"
+          },
+          "engine": {
+            "type": "string",
+            "description": "The engine used to run the plan",
+            "enum": [
+              "basic",
+              "advanced"
+            ],
+            "example": "basic"
+          },
+          "startDate": {
+            "type": "string",
+            "description": "The date when the plan started",
+            "example": "2022-09-07T22:42:47.161Z",
+            "format": "date-time"
+          },
+          "finishDate": {
+            "type": "string",
+            "description": "The date when the plan finished",
+            "example": "2022-09-07T22:43:27.623Z",
+            "format": "date-time"
+          },
+          "status": {
+            "description": "The item status",
+            "type": "string",
+            "enum": [
+              "processing",
+              "finished",
+              "failed"
+            ],
+            "example": "finished"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "engine",
+          "startDate",
+          "status"
+        ]
+      },
+      "FulfillmentPlanWithLedger": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FulfillmentPlan"
+          },
+          {
+            "properties": {
+              "ledger": {
+                "type": "array",
+                "description": "A list of decisions made while building the plan",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "description": "The date when the decision was made",
+                      "format": "date-time",
+                      "example": "2022-09-07T22:42:49.161Z"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "A code associated to the decision. Find more information about this codes [here](#tag/Decisions).",
+                      "example": "PIC001"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "A short message explaining the decision",
+                      "example": "Skipping picking simulation because order has external picking enabled"
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "description": "Optional additional data about the decision",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "FulfillmentPlanList": {
+        "type": "array",
+        "description": "A list of Fulfillment Plans",
+        "items": {
+          "$ref": "#/components/schemas/FulfillmentPlan"
+        }
+      },
+      "FulfillmentProfile": {
+        "description": "This profiles to define the behaviour of the DOM when it creates the fulfillment plan for each order.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/BasicFulfillmentProfile"
+          },
+          {
+            "$ref": "#/components/schemas/AdvancedFulfillmentProfile"
+          }
+        ]
+      },
+      "BasicFulfillmentProfile": {
+        "type": "object",
+        "title": "Basic",
+        "properties": {
+          "useNewDomVersion": {
+            "$ref": "#/components/schemas/FulfillmentPlanOptIn"
+          },
+          "engine": {
+            "type": "string",
+            "description": "This engine will attempt to use the information provided in the order.\n1. Same carrier, if possible. Otherwise, same Shipping type.\n1. Orders fulfillment will never be splitted between multiple locations\n",
+            "enum": [
+              "basic"
+            ],
+            "example": "basic"
+          },
+          "engineParameters": {
+            "type": "object",
+            "description": "These are the parameters to be used by the engine.",
+            "properties": {
+              "deliveryRestriction": {
+                "type": "string",
+                "description": "Which level of delivery selection should be honored",
+                "enum": [
+                  "carrier",
+                  "shippingSLA",
+                  "shippingType"
+                ],
+                "default": "carrier"
+              },
+              "pickingWaveSelection": {
+                "type": "string",
+                "description": "Which is the criteria to pick a picking wave",
+                "enum": [
+                  "asSoonAsPossible",
+                  "closestToDeliveryWindow"
+                ],
+                "default": "asSoonAsPossible"
+              }
+            }
+          },
+          "postDistribution": {
+            "type": "object",
+            "description": "Defines the behavior of the post-distribution process.",
+            "properties": {
+              "recalculateShipping": {
+                "type": "boolean",
+                "description": "Determines whether the shipping should be recalculated."
+              }
+            }
+          },
+          "salesChannel": {
+            "type": "array",
+            "description": "The different sales channels assigned to the profile.",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "6321dd0e328a1b837e7dbf43"
+            ]
+          },
+          "shippingType": {
+            "type": "array",
+            "description": "The different shipping type to which the profile may belong.",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "store_pickup"
+            ]
+          },
+          "status": {
+            "description": "The Fulfillment Profile status",
+            "type": "string",
+            "enum": [
+              "inactive",
+              "active"
+            ],
+            "example": "active"
+          }
+        }
+      },
+      "AdvancedFulfillmentProfile": {
+        "type": "object",
+        "title": "Advanced",
+        "properties": {
+          "useNewDomVersion": {
+            "$ref": "#/components/schemas/FulfillmentPlanOptIn"
+          },
+          "engine": {
+            "type": "string",
+            "description": "This engine will make the best effort to find the best plan available at the moment.\n1. Prioritize warehouses to pick based on [Product Groups](/v2/service/catalog#tag/Product-Group)\n1. Search for the best carrier of the given shipping type\n1. Search for stock available in order to optimize operations\n\nNote: This engine may split the order for picking or delivery.\n",
+            "enum": [
+              "advanced"
+            ],
+            "example": "advanced"
+          },
+          "engineParameters": {
+            "type": "object",
+            "description": "These are the parameters to be used by the engine.",
+            "properties": {
+              "deliveryRestriction": {
+                "type": "string",
+                "description": "Which level of delivery selection should be honored",
+                "enum": [
+                  "carrier",
+                  "shippingSLA",
+                  "shippingType"
+                ],
+                "default": "carrier"
+              },
+              "pickingWaveSelection": {
+                "type": "string",
+                "description": "Which is the criteria to pick a picking wave",
+                "enum": [
+                  "asSoonAsPossible",
+                  "closestToDeliveryWindow"
+                ],
+                "default": "asSoonAsPossible"
+              },
+              "internalMovementsWithShipping": {
+                "type": "boolean",
+                "description": "Determines whether internal movements between warehouses should be associated with a shipping when necessary.",
+                "example": true
+              },
+              "internalDistributionMethod": {
+                "type": "string",
+                "description": "Determines which distribution method should be used for internal movements.",
+                "enum": [
+                  "movements",
+                  "orderReceiving"
+                ],
+                "example": "movements"
+              },
+              "prioritizePickingInDeliveryWarehouse": {
+                "type": "boolean",
+                "description": "Prioritizes that the picking warehouse is the same as the delivery warehouse.",
+                "example": true
+              },
+              "timeSlotAssign": {
+                "type": "string",
+                "enum": [
+                  "restrictedQuota",
+                  "prioritizeQuota",
+                  "ignoreQuota"
+                ],
+                "description": "Defines how available quotas should be taken into account when simulating delivery.",
+                "example": "prioritizeQuota"
+              },
+              "foundRate": {
+                "type": "object",
+                "description": "Defines how the found rate is to be evaluated",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "quantity",
+                      "amount"
+                    ],
+                    "description": "Defines whether the found rate should be calculated based on the quantity of items or their price.",
+                    "example": "amount"
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "Specifies the minimum percentage required for the option to be valid, if set to 0 or empty the minimum is not evaluated.",
+                    "example": 10
+                  }
+                }
+              },
+              "splitOrderRules": {
+                "type": "object",
+                "description": "Define the rules to be applied when splitting orders",
+                "properties": {
+                  "allow": {
+                    "type": "boolean",
+                    "description": "Enables or disables the possibility of splitting orders.",
+                    "example": true
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "order",
+                      "picking"
+                    ],
+                    "description": "Defines whether the split is to be order or picking split",
+                    "example": "picking"
+                  },
+                  "onlySplitPicking": {
+                    "type": "boolean",
+                    "readOnly": true,
+                    "description": "Determines whether the split is performed on the order or only on the picking.",
+                    "example": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Defines the limit of possible split orders.",
+                    "example": 3
+                  },
+                  "minimumAmount": {
+                    "type": "number",
+                    "description": "Specifies the minimum amount a split order must reach to be considered valid, if set to 0 or empty the minimum is not evaluated.",
+                    "example": 50
+                  },
+                  "consolidateShipping": {
+                    "type": "boolean",
+                    "description": "Unifies split orders into a single shipping.",
+                    "example": true
+                  }
+                }
+              },
+              "carrierPriority": {
+                "type": "string",
+                "enum": [
+                  "lowerShippingCost"
+                ],
+                "description": "Defines the criteria for prioritization of carriers.",
+                "example": "lowerShippingCost"
+              },
+              "usePickupPoint": {
+                "type": "boolean",
+                "description": "Indicates whether you have to use the pickup points.",
+                "example": true
+              },
+              "onlyUsePreferredWarehousesWithStock": {
+                "type": "string",
+                "description": "Restricts which warehouses can be used based on preferred warehouses and stock availability.",
+                "enum": [
+                  "none",
+                  "only",
+                  "partial"
+                ],
+                "example": "none"
+              }
+            }
+          },
+          "postDistribution": {
+            "type": "object",
+            "description": "Defines the behavior of the post-distribution process.",
+            "properties": {
+              "recalculateShipping": {
+                "type": "boolean",
+                "description": "Determines whether the shipping should be recalculated."
+              }
+            }
+          },
+          "salesChannel": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of object IDs representing the different sales channels assigned to the profile.",
+            "example": [
+              "6014c9f605c8e6000c2a95d4",
+              "6014c9f605c8e6000c2a95d5"
+            ]
+          },
+          "shippingType": {
+            "type": "array",
+            "description": "The different shipping type to which the profile may belong.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "express_delivery",
+                "delivery",
+                "drive_through",
+                "store_pickup"
+              ]
+            },
+            "example": [
+              "store_pickup"
+            ]
+          },
+          "status": {
+            "description": "The Fulfillment Profile status",
+            "type": "string",
+            "enum": [
+              "inactive",
+              "active"
+            ],
+            "example": "active"
+          }
+        }
+      },
+      "FulfillmentPlanOptIn": {
+        "type": "boolean",
+        "description": "Opt-in flag to try the new DOM",
+        "default": false,
+        "example": false
+      },
+      "FulfillmentProfileList": {
+        "type": "array",
+        "description": "A list of Fulfillment Profiles",
+        "items": {
+          "$ref": "#/components/schemas/FulfillmentProfile"
+        }
+      },
+      "NewOrderDistributionList": {
+        "type": "array",
+        "description": "A list of new-order-distribution",
+        "items": {
+          "$ref": "#/components/schemas/NewOrderDistribution"
+        }
+      },
+      "NewOrderDistribution": {
+        "type": "object",
+        "description": "A New-Order-Distribution",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/id"
+          },
+          "orderId": {
+            "description": "The unique identifier of the related order",
+            "type": "string",
+            "example": "d555345345345as67a335a"
+          },
+          "content": {
+            "type": "object",
+            "description": "A group of steps with data",
+            "additionalProperties": {
+              "type": "object",
+              "description": "A step with data"
+            },
+            "example": {
+              "ChooseBestCombination": {
+                "order": {
+                  "id": "d555345345345as67a335a"
+                },
+                "choose": {
+                  "score": 10
+                }
+              }
+            }
+          },
+          "userCreated": {
+            "$ref": "#/components/schemas/userCreated"
+          },
+          "userModified": {
+            "$ref": "#/components/schemas/userModified"
+          },
+          "dateCreated": {
+            "$ref": "#/components/schemas/dateCreated"
+          },
+          "dateModified": {
+            "$ref": "#/components/schemas/dateModified"
+          }
+        }
+      },
+      "StepLogsList": {
+        "type": "array",
+        "description": "A list of step-logs",
+        "items": {
+          "$ref": "#/components/schemas/StepLog"
+        }
+      },
+      "StepLog": {
+        "type": "object",
+        "description": "A Step-Log",
+        "properties": {
+          "id": {
+            "type": "number",
+            "description": "The Log ID",
+            "example": 1
+          },
+          "step": {
+            "type": "string",
+            "description": "The name of the Step Function",
+            "example": "SimulatePicking"
+          },
+          "message": {
+            "type": "string",
+            "description": "An informative message, the reason that triggered the log",
+            "example": "Success in Delivery Simulation"
+          },
+          "status": {
+            "type": "string",
+            "description": "The kind of log",
+            "enum": [
+              "info",
+              "warn",
+              "error"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "description": "The day of log's creation",
+            "format": "date-time",
+            "example": "2021-09-06T23:30:00.000Z"
+          },
+          "content": {
+            "type": "object",
+            "description": "Extra information",
+            "example": {
+              "simulations": []
+            }
+          }
+        }
+      },
+      "FulfillmentPlanSettings": {
+        "description": "This settings define the behaviour of the DOM when it creates the fulfillment plan for each order.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/BasicFulfillmentPlanSettings"
+          },
+          {
+            "$ref": "#/components/schemas/AdvancedFulfillmentPlanSettings"
+          }
+        ]
+      },
+      "BasicFulfillmentPlanSettings": {
+        "type": "object",
+        "title": "Basic",
+        "properties": {
+          "useNewDomVersion": {
+            "$ref": "#/components/schemas/FulfillmentPlanOptIn"
+          },
+          "engine": {
+            "type": "string",
+            "description": "This engine will attempt to use the information provided in the order.\n1. Same carrier, if possible. Otherwise, same Shipping type.\n1. Orders fulfillment will never be splitted between multiple locations\n",
+            "enum": [
+              "basic"
+            ],
+            "example": "basic"
+          },
+          "engineParameters": {
+            "type": "object",
+            "properties": {
+              "deliveryRestriction": {
+                "type": "string",
+                "description": "Which level of delivery selection should be honored",
+                "enum": [
+                  "carrier",
+                  "shippingSLA",
+                  "shippingType"
+                ],
+                "default": "carrier"
+              },
+              "pickingWaveSelection": {
+                "type": "string",
+                "description": "Which is the criteria to pick a picking wave",
+                "enum": [
+                  "asSoonAsPossible",
+                  "closestToDeliveryWindow"
+                ],
+                "default": "asSoonAsPossible"
+              }
+            }
+          }
+        }
+      },
+      "AdvancedFulfillmentPlanSettings": {
+        "type": "object",
+        "title": "Advanced",
+        "properties": {
+          "useNewDomVersion": {
+            "$ref": "#/components/schemas/FulfillmentPlanOptIn"
+          },
+          "engine": {
+            "type": "string",
+            "description": "This engine will make the best effort to find the best plan available at the moment.\n1. Prioritize warehouses to pick based on [Product Groups](/v2/service/catalog#tag/Product-Group)\n1. Search for the best carrier of the given shipping type\n1. Search for stock available in order to optimize operations\n\nNote: This engine may split the order for picking or delivery.\n",
+            "enum": [
+              "advanced"
+            ],
+            "example": "advanced"
+          },
+          "engineParameters": {
+            "type": "object",
+            "properties": {
+              "deliveryRestriction": {
+                "type": "string",
+                "description": "Which level of delivery selection should be honored",
+                "enum": [
+                  "carrier",
+                  "shippingSLA",
+                  "shippingType"
+                ],
+                "default": "carrier"
+              },
+              "pickingWaveSelection": {
+                "type": "string",
+                "description": "Which is the criteria to pick a picking wave",
+                "enum": [
+                  "asSoonAsPossible",
+                  "closestToDeliveryWindow"
+                ],
+                "default": "asSoonAsPossible"
+              },
+              "internalMovementsWithShipping": {
+                "type": "boolean",
+                "description": "Determines whether internal movements between warehouses should be associated with a shipping when necessary.",
+                "example": true
+              },
+              "timeSlotAssign": {
+                "type": "string",
+                "enum": [
+                  "restrictedQuota",
+                  "prioritizeQuota",
+                  "ignoreQuota"
+                ],
+                "description": "Defines how available quotas should be taken into account when simulating delivery.",
+                "example": "prioritizeQuota"
+              },
+              "foundRate": {
+                "type": "object",
+                "description": "Defines how the found rate is to be evaluated",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "quantity",
+                      "amount"
+                    ],
+                    "description": "Defines whether the found rate should be calculated based on the quantity of items or their price.",
+                    "example": "amount"
+                  },
+                  "value": {
+                    "type": "number",
+                    "description": "Specifies the minimum percentage required for the option to be valid, if set to 0 or empty the minimum is not evaluated.",
+                    "example": 10
+                  }
+                }
+              },
+              "splitOrderRules": {
+                "type": "object",
+                "description": "Define the rules to be applied when splitting orders",
+                "properties": {
+                  "allow": {
+                    "type": "boolean",
+                    "description": "Enables or disables the possibility of splitting orders.",
+                    "example": true
+                  },
+                  "onlySplitPicking": {
+                    "type": "boolean",
+                    "description": "Determines whether the split is performed on the order or only on the picking.",
+                    "example": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Defines the limit of possible split orders.",
+                    "example": 3
+                  },
+                  "minimumAmount": {
+                    "type": "number",
+                    "description": "Specifies the minimum amount a split order must reach to be considered valid, if set to 0 or empty the minimum is not evaluated.",
+                    "example": 50
+                  },
+                  "consolidateShipping": {
+                    "type": "boolean",
+                    "description": "Unifies split orders into a single shipping.",
+                    "example": true
+                  }
+                }
+              },
+              "carrierPriority": {
+                "type": "string",
+                "enum": [
+                  "lowerShippingCost"
+                ],
+                "description": "Defines the criteria for prioritization of carriers.",
+                "example": "lowerShippingCost"
+              }
+            }
+          }
+        }
+      },
+      "listenerEvent": {
+        "description": "A JANIS Event object",
+        "type": "object",
+        "properties": {
+          "service": {
+            "description": "The source service name",
+            "type": "string",
+            "example": "id"
+          },
+          "entity": {
+            "description": "The event related entity",
+            "type": "string",
+            "example": "profile"
+          },
+          "event": {
+            "description": "The event name",
+            "type": "string",
+            "example": "created"
+          },
+          "client": {
+            "description": "The source event client",
+            "type": "string",
+            "example": "fizzmod"
+          },
+          "id": {
+            "description": "The event related entity ID",
+            "type": "string",
+            "example": "5d699c1ae8ebb95eaa24aca9"
+          }
+        },
+        "required": [
+          "service",
+          "entity",
+          "event"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "janis-api-key",
+        "description": "The API Key"
+      },
+      "ApiSecret": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "janis-api-secret",
+        "description": "The API Secret"
+      },
+      "JanisClient": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "janis-client",
+        "description": "The Client Code"
+      }
+    },
+    "parameters": {
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "schema": {
+          "type": "string",
+          "example": "d555345345345as67a342a"
+        },
+        "required": true,
+        "description": "The unique identifier of the item"
+      },
+      "ListSortDirection": {
+        "name": "sortDirection",
+        "in": "query",
+        "description": "The direction to sort by",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "asc",
+            "desc"
+          ]
+        }
+      },
+      "ListPageNumber": {
+        "name": "x-janis-page",
+        "in": "header",
+        "description": "The page to get",
+        "required": false,
+        "schema": {
+          "type": "number",
+          "default": 1
+        }
+      },
+      "ListPageSize": {
+        "name": "x-janis-page-size",
+        "in": "header",
+        "description": "The page size to get",
+        "required": false,
+        "schema": {
+          "type": "number",
+          "default": 60
+        }
+      },
+      "JanisEntity": {
+        "name": "janis-entity",
+        "in": "header",
+        "description": "The entity name",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "FulfillmentPlanSortBy": {
+        "name": "sortBy",
+        "in": "query",
+        "description": "The field to sort by",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "startDate",
+            "endDate",
+            "status"
+          ]
+        }
+      },
+      "FulfillmentPlanFilters": {
+        "name": "filters",
+        "in": "query",
+        "description": "The filters to apply to the list",
+        "required": false,
+        "style": "deepObject",
+        "explode": true,
+        "schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/components/schemas/FulfillmentPlan/properties/id"
+            },
+            "orderId": {
+              "$ref": "#/components/schemas/FulfillmentPlan/properties/orderId"
+            },
+            "status": {
+              "$ref": "#/components/schemas/FulfillmentPlan/properties/status"
+            },
+            "dateCreatedRange": {
+              "type": "object",
+              "description": "A range for creation date.",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "description": "The beginning of the range",
+                  "format": "date-time",
+                  "example": "2019-11-27T16:08:24.994Z"
+                },
+                "to": {
+                  "type": "string",
+                  "description": "The end of the range",
+                  "format": "date-time",
+                  "example": "2019-11-30T16:08:24.994Z"
+                }
+              }
+            }
+          }
+        }
+      },
+      "FulfillmentProfileSortBy": {
+        "name": "sortBy",
+        "in": "query",
+        "description": "The field to sort by",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "name",
+            "useNewDomVersion",
+            "shippingMethod",
+            "salesChannel",
+            "status",
+            "dateCreated",
+            "dateModified"
+          ]
+        }
+      },
+      "FulfillmentProfileFilters": {
+        "name": "filters",
+        "in": "query",
+        "description": "The filters to apply to the list",
+        "required": false,
+        "style": "deepObject",
+        "explode": true,
+        "schema": {
+          "type": "object",
+          "properties": {
+            "useNewDomVersion": {
+              "$ref": "#/components/schemas/BasicFulfillmentProfile/properties/useNewDomVersion"
+            }
+          }
+        }
+      },
+      "OrderId": {
+        "name": "orderId",
+        "in": "path",
+        "schema": {
+          "type": "string",
+          "example": "d555345345345as67a342a"
+        },
+        "required": true,
+        "description": "The order ID"
+      },
+      "LogId": {
+        "name": "id",
+        "in": "path",
+        "schema": {
+          "type": "number",
+          "example": 1
+        },
+        "required": true,
+        "description": "The ID of the Step-Log, must be positive or 0"
+      }
+    },
+    "headers": {
+      "x-janis-total": {
+        "description": "The total amount of records in the list",
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "responses": {
+      "GenericSuccess": {
+        "description": "Operation succeeded",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "A client error has ocurred.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "description": "A message explaining the error",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Authentication missing or invalid",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "description": "A message explaining the error",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Not authorized request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "description": "A message explaining the error",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "A server error has ocurred."
+      },
+      "NotFound": {
+        "description": "Item is not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "description": "A message explaining the error",
+                  "type": "string",
+                  "example": "common.message.notFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

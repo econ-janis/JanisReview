@@ -1,0 +1,265 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  OMS Capability Auditor — audita capacidades de configuración de clientes
+  Janis contra oms/dom/delivery/picking/tms, persiste resultados y expone
+  una API de solo lectura para el dashboard interno.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, qa, prod]
+    Description: Ambiente de despliegue. Usar 'qa' para validar contra oms.janisqa.in antes de 'prod'.
+
+  AuditResultsTableName:
+    Type: String
+    Default: oms-capability-audit-results
+    Description: Nombre de la tabla DynamoDB (partition key clientId, sort key compuesta capabilityId#auditedAt).
+
+  ActiveClientsParameterName:
+    Type: String
+    Default: /oms-auditor/active-clients
+    Description: >
+      Parámetro SSM con la lista de clientIds activos (separados por coma),
+      hasta que se confirme un endpoint de commerce/accounts para leerla
+      automáticamente. Se actualiza manualmente fuera de este stack — el
+      valor por defecto es un placeholder, nunca clientes reales.
+
+  AuditScheduleExpression:
+    Type: String
+    Default: 'cron(0 6 * * ? *)'
+    Description: Horario de bajo tráfico (UTC) para la auditoría diaria de todos los clientes activos.
+
+  AllowedPrincipalOrgId:
+    Type: String
+    Default: ''
+    Description: >
+      (Opcional, recomendado) AWS Organizations Org ID de Janis. Si se
+      define, la API de consulta solo acepta llamadas de principals de esa
+      organización, además del IAM auth por request.
+
+  JanisOmsApiBaseUrl:
+    Type: String
+    Default: https://oms.janis.in/api
+  JanisDomApiBaseUrl:
+    Type: String
+    Default: https://dom.janis.in/api
+  JanisDeliveryApiBaseUrl:
+    Type: String
+    Default: https://delivery.janis.in/api
+  JanisPickingApiBaseUrl:
+    Type: String
+    Default: https://picking.janis.in/api
+  JanisTmsApiBaseUrl:
+    Type: String
+    Default: https://tms.janis.in/api
+
+Conditions:
+  HasOrgIdRestriction: !Not [!Equals [!Ref AllowedPrincipalOrgId, '']]
+
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Timeout: 60
+    MemorySize: 256
+    Tracing: Active
+    Architectures: [arm64]
+
+Resources:
+
+  # ---------------------------------------------------------------------
+  # Persistencia
+  # ---------------------------------------------------------------------
+  AuditResultsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref AuditResultsTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: clientId
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: clientId
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      Tags:
+        - Key: data-classification
+          Value: client-configuration-internal-only
+
+  # ---------------------------------------------------------------------
+  # Lambda de auditoría — llama a Janis con las credenciales del cliente,
+  # evalúa capabilities/oms-capabilities.json y persiste el resultado.
+  # Nunca expuesto a internet: solo lo invoca DispatcherFunction (o un
+  # operador autorizado vía consola/CLI con permisos de lambda:InvokeFunction
+  # acotados a este ARN).
+  # ---------------------------------------------------------------------
+  AuditFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub oms-auditor-audit-${Stage}
+      CodeUri: lambda/
+      Handler: audit/index.handler
+      Environment:
+        Variables:
+          AUDIT_RESULTS_TABLE_NAME: !Ref AuditResultsTableName
+          JANIS_OMS_API_BASE_URL: !Ref JanisOmsApiBaseUrl
+          JANIS_DOM_API_BASE_URL: !Ref JanisDomApiBaseUrl
+          JANIS_DELIVERY_API_BASE_URL: !Ref JanisDeliveryApiBaseUrl
+          JANIS_PICKING_API_BASE_URL: !Ref JanisPickingApiBaseUrl
+          JANIS_TMS_API_BASE_URL: !Ref JanisTmsApiBaseUrl
+      Policies:
+        - Statement:
+            - Sid: ReadOnlyClientAppCredentials
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              # Solo secrets con el naming convention de clientes de Janis.
+              # Nunca '*'.
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:janis/clients/*/app-credentials-*
+        - Statement:
+            - Sid: WriteAuditResultsOnly
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:BatchWriteItem
+              Resource: !GetAtt AuditResultsTable.Arn
+
+  # ---------------------------------------------------------------------
+  # Lambda de consulta — GET /audit-results/{clientId}. Solo lectura de
+  # DynamoDB, nunca toca Secrets Manager ni llama a Janis.
+  # ---------------------------------------------------------------------
+  QueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub oms-auditor-query-${Stage}
+      CodeUri: lambda/
+      Handler: query/index.handler
+      Environment:
+        Variables:
+          AUDIT_RESULTS_TABLE_NAME: !Ref AuditResultsTableName
+      Policies:
+        - Statement:
+            - Sid: QueryAuditResultsOnly
+              Effect: Allow
+              Action: dynamodb:Query
+              Resource: !GetAtt AuditResultsTable.Arn
+      Events:
+        GetAuditResults:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuditResultsApi
+            Path: /audit-results/{clientId}
+            Method: get
+
+  # ---------------------------------------------------------------------
+  # API Gateway — NUNCA pública sin autorización. Auth por defecto: IAM
+  # (SigV4). Pensada para ser llamada por un backend/BFF interno de Janis ya
+  # autenticado (SSO), no directamente desde el navegador con credenciales
+  # embebidas. Si Janis usa Cognito para sus apps internas, reemplazar el
+  # DefaultAuthorizer por un CognitoUserPool authorizer — ver
+  # docs/DEPLOYMENT_PLAN.md, sección "Decisión pendiente: auth del dashboard".
+  # ---------------------------------------------------------------------
+  AuditResultsApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: /*
+          HttpMethod: '*'
+          ThrottlingRateLimit: 20
+          ThrottlingBurstLimit: 10
+      AccessLogSetting:
+        DestinationArn: !GetAtt AuditResultsApiAccessLogs.Arn
+        # Solo metadata de request (método, path, status, latencia) — nunca
+        # loguear headers de auth ni el body de la respuesta (que contiene
+        # datos de configuración del cliente).
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","httpMethod":"$context.httpMethod","path":"$context.path","status":"$context.status","responseLength":"$context.responseLength"}'
+      Auth:
+        DefaultAuthorizer: AWS_IAM
+        ResourcePolicy:
+          CustomStatements:
+            - !If
+              - HasOrgIdRestriction
+              - Effect: Deny
+                Principal: '*'
+                Action: execute-api:Invoke
+                Resource: 'execute-api:/*'
+                Condition:
+                  StringNotEquals:
+                    aws:PrincipalOrgID: !Ref AllowedPrincipalOrgId
+              - !Ref AWS::NoValue
+
+  AuditResultsApiAccessLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/oms-auditor-${Stage}
+      RetentionInDays: 90
+
+  # ---------------------------------------------------------------------
+  # Dispatcher — EventBridge (1x/día) dispara este Lambda, que lee la lista
+  # de clientes activos desde SSM y llama a AuditFunction de forma
+  # asincrónica para cada uno. No expone nada a internet.
+  # ---------------------------------------------------------------------
+  DispatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub oms-auditor-dispatcher-${Stage}
+      CodeUri: lambda/
+      Handler: dispatcher/index.handler
+      Environment:
+        Variables:
+          ACTIVE_CLIENTS_PARAMETER_NAME: !Ref ActiveClientsParameterName
+          AUDIT_FUNCTION_NAME: !Ref AuditFunction
+      Policies:
+        - Statement:
+            - Sid: ReadActiveClientsParameterOnly
+              Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ActiveClientsParameterName}
+        - Statement:
+            - Sid: InvokeAuditFunctionOnly
+              Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt AuditFunction.Arn
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref AuditScheduleExpression
+            Description: Auditoría diaria de todos los clientes activos, en horario de bajo tráfico.
+            Enabled: true
+
+  ActiveClientsParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Ref ActiveClientsParameterName
+      Type: String
+      # Placeholder deliberado — NUNCA commitear clientIds reales al stack.
+      # Un operador autorizado actualiza este valor manualmente después del
+      # despliegue (aws ssm put-parameter ...). Ver docs/DEPLOYMENT_PLAN.md.
+      Value: 'REEMPLAZAR-CON-CLIENTES-REALES-SEPARADOS-POR-COMA'
+      Description: Lista manual de clientIds activos, pendiente de reemplazo por fuente automática (commerce/accounts).
+
+Outputs:
+  AuditFunctionArn:
+    Value: !GetAtt AuditFunction.Arn
+  QueryFunctionArn:
+    Value: !GetAtt QueryFunction.Arn
+  DispatcherFunctionArn:
+    Value: !GetAtt DispatcherFunction.Arn
+  AuditResultsTableName:
+    Value: !Ref AuditResultsTableName
+  AuditResultsApiEndpoint:
+    Description: Endpoint IAM-protegido. Requiere SigV4 (rol/usuario autorizado).
+    Value: !Sub https://${AuditResultsApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/audit-results/{clientId}
