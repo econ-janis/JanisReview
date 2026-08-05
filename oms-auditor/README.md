@@ -6,9 +6,18 @@ través de 5 microservicios confirmados: **oms, dom, delivery, picking,
 tms**. El resultado se presenta en lenguaje de negocio — "Lo usa" / "No lo
 usa" — nunca "ok"/"pendiente".
 
-> ⚠️ Este repo contiene infraestructura como código y no fue desplegado
-> contra ninguna cuenta de AWS. Ver **[docs/DEPLOYMENT_PLAN.md](docs/DEPLOYMENT_PLAN.md)**
-> antes de correr `sam deploy`.
+Hay **dos variantes de infraestructura** sobre la misma fuente de verdad
+(`capabilities/oms-capabilities.json`) y la misma lógica de evaluación:
+
+| Variante | Carpeta | Estado |
+|---|---|---|
+| AWS (SAM: Lambda + DynamoDB + API Gateway) | `template.yaml`, `lambda/`, `dashboard/` | Construida primero, 16/16 tests unitarios en verde. No desplegada. |
+| Vercel (Serverless Functions + Postgres/Neon) | `vercel-app/` | Pivot pedido después — ver su propio README. 22/22 tests en verde. No desplegada. Sigue usando AWS Secrets Manager solo para credenciales de cliente (Vercel no tiene equivalente). |
+
+> ⚠️ Ninguna de las dos se desplegó contra una cuenta real. Ver
+> **[docs/DEPLOYMENT_PLAN.md](docs/DEPLOYMENT_PLAN.md)** (AWS) o
+> **[docs/DEPLOYMENT_PLAN_VERCEL.md](docs/DEPLOYMENT_PLAN_VERCEL.md)** (Vercel)
+> antes de correr `sam deploy` / `vercel deploy --prod`.
 
 ## Estructura
 

@@ -1,0 +1,168 @@
+{
+  "module": "order-lifecycle (5 microservicios confirmados: oms, dom, delivery, picking, tms)",
+  "version": "0.3.0",
+  "description": "Capacidades que un cliente DEBERÍA tener configuradas correctamente en el ciclo de gestión de pedidos para operar sin desvíos atribuibles a configuración. TODAS las entradas de este archivo están confirmadas contra los openapi reales de cada servicio (ver carpeta reference/). No quedan hipótesis de path - lo que no está confirmado se dejó afuera en vez de adivinarlo.",
+  "servicios_confirmados": {
+    "oms": "Order Management System - oms.janis.in/api",
+    "dom": "Distributed Order Management - dom.janis.in/api",
+    "delivery": "Delivery Service - delivery.janis.in/api",
+    "picking": "Picking Service - picking.janis.in/api",
+    "tms": "Tms Service (ruteo/flota) - tms.janis.in/api"
+  },
+  "servicios_mencionados_pero_no_confirmados": {
+    "commerce": "Referenciado desde delivery (Account, Location) - /v2/service/commerce",
+    "catalog": "Referenciado desde picking (Category, Sku) - /v2/service/catalog"
+  },
+  "capabilities": [
+    {
+      "id": "oms-001",
+      "name": "Reglas de auditoría activas",
+      "descripcion": "El cliente debería tener al menos una Audit Rule con status 'active' acorde a su operación (monto, fill-rate, cliente corporativo, blacklist, etc.), no operar con cero reglas.",
+      "modulo_real": "oms",
+      "endpoint": {
+        "method": "GET",
+        "path": "/audit-rule",
+        "notes": "CONFIRMADO contra openapi de OMS."
+      },
+      "extract": { "type": "countArrayWhere", "field": "status", "equals": "active" },
+      "expected": { "field": "reglasActivas", "value": ">=1" },
+      "severidad": "media",
+      "referencia": "docs funcionales: reglas-de-auditoría"
+    },
+    {
+      "id": "oms-002",
+      "name": "Comportamiento de geolocalización de dirección no es 'mustBeComplete' estricto",
+      "descripcion": "El setting addressGeolocationBehaviour de Order define qué pasa si falta o falla la geolocalización. 'mustBeComplete' hace fallar el pedido/lo manda a Requiere Intervención sin fallback; 'tryButDoNotFail' o 'skip' permiten continuar con la geo original en vez de bloquear.",
+      "modulo_real": "oms",
+      "endpoint": {
+        "method": "GET",
+        "path": "/setting/order",
+        "notes": "CONFIRMADO - schema OmsOrderSettings, campo addressGeolocationBehaviour"
+      },
+      "extract": { "type": "field", "field": "addressGeolocationBehaviour" },
+      "expected": { "field": "addressGeolocationBehaviour", "value": "not:mustBeComplete" },
+      "severidad": "alta",
+      "referencia": "diagnostico-no-carriers-available.md; casos Chedraui/PMC y Rosen"
+    },
+    {
+      "id": "oms-003",
+      "name": "Order Hook de integración (completeOrder) activo",
+      "descripcion": "Si el cliente depende de que Janis notifique a un sistema externo al completar el pedido, debe existir un Order Hook con hookName 'completeOrder' y status active.",
+      "modulo_real": "oms",
+      "endpoint": {
+        "method": "GET",
+        "path": "/order-hook",
+        "notes": "CONFIRMADO - único hookName soportado en esta versión es 'completeOrder'"
+      },
+      "extract": { "type": "countArrayWhere", "field": "status", "equals": "active" },
+      "expected": { "field": "hooksActivos", "value": ">=1" },
+      "severidad": "media",
+      "referencia": "caso Alimerka/SFCC - la sync específica de c_customStatus no está confirmada en ningún openapi disponible, puede resolverse client-side vía este hook"
+    },
+    {
+      "id": "oms-004",
+      "name": "Perfil de importación de pedidos con sincronización activa",
+      "descripcion": "Debe existir al menos un Order Import Profile con allowSync=true cubriendo los canales de venta reales del cliente. Sin esto, la sync con la plataforma de comercio queda rota en silencio.",
+      "modulo_real": "oms",
+      "endpoint": {
+        "method": "GET",
+        "path": "/order-import-profile",
+        "notes": "CONFIRMADO - devuelve lista con allowImport/allowSync/salesChannelIds"
+      },
+      "extract": { "type": "countArrayWhere", "field": "allowSync", "equals": true },
+      "expected": { "field": "profilesConSyncActiva", "value": ">=1" },
+      "severidad": "alta",
+      "referencia": "bugs de sync de catálogo VTEX/SFCC"
+    },
+    {
+      "id": "dom-001",
+      "name": "Perfil de Fulfillment configurado",
+      "descripcion": "Debe existir al menos un Fulfillment Profile (Basic o Advanced) activo. Sin esto, el DOM opera con comportamiento default no auditado para todas las combinaciones canal x tipo de entrega.",
+      "modulo_real": "dom",
+      "endpoint": {
+        "method": "GET",
+        "path": "/fulfillment-profile",
+        "notes": "CONFIRMADO contra openapi de DOM. oneOf BasicFulfillmentProfile | AdvancedFulfillmentProfile."
+      },
+      "extract": { "type": "countArrayWhere", "field": "status", "equals": "active" },
+      "expected": { "field": "perfilesActivos", "value": ">=1" },
+      "severidad": "alta",
+      "referencia": "docs funcionales: dom-versión-2"
+    },
+    {
+      "id": "dom-002",
+      "name": "Fulfillment Plan Settings configurado",
+      "descripcion": "El setting global de fulfillment plan (Basic o Advanced) debe existir y no depender del default de fábrica sin revisión.",
+      "modulo_real": "dom",
+      "endpoint": {
+        "method": "GET",
+        "path": "/setting/fulfillmentplan",
+        "notes": "CONFIRMADO como endpoint dedicado (distinto de /setting/{entity} genérico) - schema FulfillmentPlanSettings, oneOf Basic|Advanced"
+      },
+      "extract": { "type": "field", "field": "type" },
+      "expected": { "field": "type", "value": "not:null" },
+      "severidad": "media",
+      "referencia": "docs funcionales: dom-versión-2"
+    },
+    {
+      "id": "delivery-001",
+      "name": "Google Maps API Key configurada (verificación de geolocalización)",
+      "descripcion": "Sin esta key, la verificación automática de geolocalización de direcciones no funciona y toda la precisión de rutas/entregas depende de datos de geo sin validar en campo.",
+      "modulo_real": "delivery",
+      "endpoint": {
+        "method": "GET",
+        "path": "/setting/app",
+        "notes": "CONFIRMADO - schema AppSettings de Delivery, campo googleMapsApiKey"
+      },
+      "extract": { "type": "field", "field": "googleMapsApiKey" },
+      "expected": { "field": "googleMapsApiKey", "value": "not:" },
+      "severidad": "alta",
+      "referencia": "docs funcionales: verificación-de-geolocalización-en-direcciones; casos Chedraui/PMC y Rosen"
+    },
+    {
+      "id": "delivery-002",
+      "name": "Transportadoras activas con área de cobertura definida",
+      "descripcion": "Debe haber al menos una Carrier con status active y coverageArea configurada (MultiPolygon, Polygon, PostalCodes o LinearDistance). Sin cobertura definida en zonas activas del cliente, se produce dom.errors.noCarriersAvailable.",
+      "modulo_real": "delivery",
+      "endpoint": {
+        "method": "GET",
+        "path": "/carrier",
+        "notes": "CONFIRMADO - Carrier.coverageArea es oneOf MultiPolygon|PolygonRead|PostalCodes|LinearDistance. IMPORTANTE: esto solo confirma que HAY carriers activos con cobertura definida, no que la cobertura cubra el 100% de las zonas reales del cliente - ese cruce necesita datos de zonas del lado comercial (servicio 'commerce', no confirmado)."
+      },
+      "extract": { "type": "countArrayWhere", "field": "status", "equals": "active" },
+      "expected": { "field": "carriersActivos", "value": ">=1" },
+      "severidad": "alta",
+      "referencia": "diagnostico-no-carriers-available.md"
+    },
+    {
+      "id": "picking-001",
+      "name": "Zonas de picking configuradas con límites de capacidad",
+      "descripcion": "Cada Zone debería tener maxQuantityOrders/maxQuantityItems definidos para evitar sobrecarga de picking sin control.",
+      "modulo_real": "picking",
+      "endpoint": {
+        "method": "GET",
+        "path": "/zone",
+        "notes": "CONFIRMADO contra openapi de Picking Service"
+      },
+      "extract": { "type": "countArrayWhereNotNull", "field": "maxQuantityOrders" },
+      "expected": { "field": "zonasConLimiteDefinido", "value": ">=1" },
+      "severidad": "baja",
+      "referencia": "docs funcionales: sectores-de-picking"
+    },
+    {
+      "id": "tms-001",
+      "name": "Flota de vehículos configurada",
+      "descripcion": "Si el cliente gestiona rutas por TMS (ver delivery setting.app.showVersion), debe tener al menos un Vehicle activo, o la planificación de rutas no tiene con qué operar.",
+      "modulo_real": "tms",
+      "endpoint": {
+        "method": "GET",
+        "path": "/vehicle",
+        "notes": "CONFIRMADO contra openapi de Tms Service. Cruzar con delivery setting.app.showVersion ('tms'/'delivery'/'all') para saber si este servicio aplica al cliente."
+      },
+      "extract": { "type": "countArrayWhere", "field": "status", "equals": "active" },
+      "expected": { "field": "vehiculosActivos", "value": ">=1" },
+      "severidad": "media",
+      "referencia": "confirmado por AppSettings.showVersion en Delivery, que indica si el cliente usa tms, delivery o ambos"
+    }
+  ]
+}

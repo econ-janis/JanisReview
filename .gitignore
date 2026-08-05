@@ -1,4 +1,8 @@
 node_modules/
 .aws-sam/
+.vercel/
+.env
+.env.local
+.env.*.local
 *.log
 .DS_Store

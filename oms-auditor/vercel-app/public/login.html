@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ingresar — Auditor de Capacidades Janis</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .login-shell {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--janis-bg);
+    }
+    .login-card {
+      background: var(--janis-surface);
+      border: 1px solid var(--janis-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      padding: 32px;
+      width: 320px;
+    }
+    .login-card input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--janis-border);
+      background: var(--janis-bg);
+      color: var(--janis-text-900);
+      margin: 14px 0;
+      font-size: 14px;
+    }
+    .login-card button {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: var(--radius-md);
+      border: none;
+      background: var(--janis-blue-600);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .login-error { color: var(--janis-red-600); font-size: 13px; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <div class="login-shell">
+    <div class="login-card">
+      <div class="brand" style="margin-bottom: 8px;">
+        <div class="brand-mark">J</div>
+        <div class="brand-text">
+          <div class="brand-name" style="color: var(--janis-text-900);">JANIS</div>
+          <div class="brand-sub">Capability Auditor</div>
+        </div>
+      </div>
+      <p style="font-size:13px;color:var(--janis-text-600);">Acceso interno — Janis</p>
+      <form id="login-form">
+        <input type="password" id="password" placeholder="Passphrase interna" autocomplete="current-password" required />
+        <div class="login-error" id="error"></div>
+        <button type="submit">Ingresar</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const errorEl = document.getElementById('error');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      const password = document.getElementById('password').value;
+
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) {
+        errorEl.textContent = 'Passphrase incorrecta.';
+        return;
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const redirectTo = params.get('redirect') || '/index.html';
+      window.location.href = redirectTo;
+    });
+  </script>
+</body>
+</html>
